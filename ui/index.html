@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shipback SFTP</title>
+<style>
+  :root {
+    --bg: #0f172a; --panel: #1e293b; --panel-2: #273449; --line: #334155; --text: #e2e8f0; --muted: #94a3b8;
+    --accent: #f97316; --accent-2: #fb923c; --ok: #22c55e; --warn: #eab308; --bad: #ef4444; --info: #38bdf8;
+    --mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace; --sans: Inter, "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 var(--sans); }
+  header { display: flex; align-items: center; gap: 14px; padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: .02em; }
+  header h1 span { color: var(--accent); }
+  header .note { color: var(--muted); font-size: 12px; margin-left: auto; }
+  .wrap { display: grid; grid-template-columns: 260px 1fr; min-height: calc(100vh - 49px); }
+  aside { border-right: 1px solid var(--line); padding: 14px; background: #162033; }
+  aside h2, main h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); margin: 0 0 10px; }
+  .site { display: block; width: 100%; text-align: left; background: transparent; border: 1px solid transparent; color: var(--text); padding: 8px 10px; border-radius: 8px; cursor: pointer; margin-bottom: 4px; font: inherit; }
+  .site:hover { background: var(--panel); }
+  .site.active { background: var(--panel); border-color: var(--accent); }
+  .site small { display: block; color: var(--muted); font-family: var(--mono); font-size: 11px; }
+  main { padding: 18px 22px; display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-content: start; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .card.full { grid-column: 1 / -1; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  input[type=text], input[type=password], input[type=number] { width: 100%; background: var(--bg); border: 1px solid var(--line); color: var(--text); padding: 8px 10px; border-radius: 8px; font: 13px var(--mono); }
+  input:focus { outline: none; border-color: var(--accent); }
+  .row { display: flex; gap: 8px; align-items: end; }
+  .row > * { flex: 1; }
+  .row > button { flex: 0 0 auto; }
+  button { background: var(--panel-2); border: 1px solid var(--line); color: var(--text); padding: 8px 14px; border-radius: 8px; cursor: pointer; font: 500 13px var(--sans); }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #111; font-weight: 600; }
+  button.primary:hover { background: var(--accent-2); }
+  button.danger { color: var(--bad); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .opts { display: flex; gap: 18px; margin: 12px 0; flex-wrap: wrap; }
+  .opts label { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--text); font-size: 13px; cursor: pointer; }
+  .actions { display: flex; gap: 8px; margin-top: 14px; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font: 600 11px var(--mono); }
+  .pill.new { background: #14532d; color: #86efac; } .pill.changed { background: #713f12; color: #fde047; }
+  .pill.skip { background: var(--panel-2); color: var(--muted); } .pill.extra { background: #4c1d95; color: #c4b5fd; } .pill.delete { background: #7f1d1d; color: #fca5a5; }
+  .tabs { display: flex; gap: 6px; margin: 10px 0; flex-wrap: wrap; }
+  .tabs button { padding: 5px 10px; font-size: 12px; }
+  .tabs button.on { border-color: var(--accent); color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font: 12px var(--mono); }
+  td { padding: 4px 6px; border-top: 1px solid var(--line); vertical-align: top; word-break: break-all; }
+  td.r { text-align: right; color: var(--muted); white-space: nowrap; }
+  .list { max-height: 360px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+  .empty { color: var(--muted); padding: 14px; text-align: center; }
+  .log { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: 12px var(--mono); height: 260px; overflow: auto; white-space: pre-wrap; }
+  .log .ok { color: var(--ok); } .log .bad { color: var(--bad); } .log .warn { color: var(--warn); } .log .info { color: var(--info); } .log .dim { color: var(--muted); }
+  .bar { height: 6px; background: var(--bg); border-radius: 999px; overflow: hidden; margin: 8px 0; }
+  .bar i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .2s; }
+  .status { font-size: 12px; color: var(--muted); margin-top: 6px; min-height: 18px; }
+  .drop { border: 2px dashed var(--line); border-radius: 12px; padding: 22px; text-align: center; color: var(--muted); margin-top: 10px; transition: border-color .15s; }
+  .drop.over { border-color: var(--accent); color: var(--text); }
+  .drop input { display: none; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .chip { background: var(--panel-2); border-radius: 6px; padding: 2px 8px; font: 11px var(--mono); }
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 20px; width: min(560px, 92vw); }
+  dialog::backdrop { background: rgba(0,0,0,.6); }
+  dialog h3 { margin: 0 0 8px; font-size: 15px; }
+  .browse { max-height: 300px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; margin-top: 8px; }
+  .browse button { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; font-family: var(--mono); font-size: 12px; }
+  .browse button:hover { background: var(--panel-2); }
+  .path { font: 12px var(--mono); color: var(--muted); word-break: break-all; margin-top: 8px; }
+  .kv { font: 12px var(--mono); color: var(--muted); }
+  .ok-dot { color: var(--ok); } .bad-dot { color: var(--bad); }
+  @media (max-width: 900px) { .wrap { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid var(--line); } main { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Shipback <span>SFTP</span></h1>
+  <span class="kv" id="conn"></span>
+  <span class="note" id="credNote"></span>
+</header>
+<div class="wrap">
+  <aside>
+    <h2>Sites</h2>
+    <div id="sites"></div>
+    <button id="addSite" style="width:100%;margin-top:8px">+ Add site</button>
+  </aside>
+  <main>
+    <section class="card">
+      <h2>Deploy ↑ / Pull ↓ a folder</h2>
+      <label>Local folder</label>
+      <div class="row"><input type="text" id="localDir" placeholder="C:\Users\you\sites\..."><button id="browseLocal">Browse…</button></div>
+      <label>Remote folder (on the server)</label>
+      <div class="row"><input type="text" id="remoteDir" placeholder="/home/deploy/public_html"><button id="browseRemote">Browse…</button></div>
+      <div class="opts">
+        <label><input type="checkbox" id="optBackup" checked> Back up files before overwriting</label>
+        <label><input type="checkbox" id="optMirror"> Mirror (delete files the other side doesn't have — server files on deploy, local files on pull)</label>
+      </div>
+      <div class="actions">
+        <button id="preview">Preview changes</button>
+        <button id="deploy" class="primary" disabled>Deploy ↑</button>
+        <button id="pullPreview">Preview pull</button>
+        <button id="pull" disabled>Pull ↓</button>
+        <button id="editSite">Edit site</button>
+      </div>
+      <div class="status" id="planStatus"></div>
+      <div class="tabs" id="tabs"></div>
+      <div class="list" id="planList"><div class="empty">Pick a site and click Preview to see what would change.</div></div>
+    </section>
+
+    <section class="card">
+      <h2>Log</h2>
+      <div class="bar"><i id="bar"></i></div>
+      <div class="log" id="log"></div>
+      <div class="status" id="summary"></div>
+    </section>
+
+    <section class="card full">
+      <h2>Quick upload — drop files straight into a server folder</h2>
+      <label>Remote folder</label>
+      <div class="row"><input type="text" id="upRemoteDir" placeholder="/home/deploy/public_html/blog/img"><button id="browseUpRemote">Browse…</button></div>
+      <div class="drop" id="drop">Drop files here, or <u>click to choose</u> · existing files are backed up first<input type="file" id="fileInput" multiple></div>
+      <div class="chips" id="chips"></div>
+      <div class="actions"><button id="upload" class="primary" disabled>Upload</button><button id="clearFiles">Clear</button></div>
+    </section>
+
+    <section class="card">
+      <h2>Recent deploys <button id="histRefresh" style="float:right;padding:2px 8px;font-size:11px">Refresh</button></h2>
+      <div class="list" id="history"><div class="empty">Nothing recorded yet.</div></div>
+      <div class="path" id="histFile"></div>
+    </section>
+
+    <section class="card">
+      <h2>Drop-box queue</h2>
+      <p class="kv" style="margin:0 0 8px">While this app is running, anything that can write a file can trigger a run — an AI agent with no shell, a script, you. Drop a request into the queue folder; the result and log land beside it.</p>
+      <div class="path" id="queueDir"></div>
+      <pre class="log" style="height:auto;margin-top:8px">queue\homepage.request.json
+{ "action": "deploy", "site": "mysite",
+  "localDir": "C:\\work\\mysite", "dryRun": false }
+
+→ queue\homepage.result.json  +  homepage.log.txt
+actions: deploy · pull · preview   options: localDir, remoteDir, dryRun, mirror, backup, note</pre>
+    </section>
+  </main>
+</div>
+
+<dialog id="pwDlg">
+  <h3>Password for <span id="pwSite"></span></h3>
+  <p class="kv" id="pwMsg">Stored in Windows Credential Manager after the first successful login.</p>
+  <form method="dialog">
+    <label>Password</label><input type="password" id="pwInput" autocomplete="current-password">
+    <div class="actions"><button value="cancel">Cancel</button><button value="ok" class="primary" id="pwOk">Connect</button></div>
+  </form>
+</dialog>
+
+<dialog id="siteDlg">
+  <h3 id="siteDlgTitle">Add site</h3>
+  <form method="dialog" id="siteForm">
+    <label>Name (short, no spaces)</label><input type="text" name="name" required pattern="[\w.-]+" placeholder="mysite">
+    <div class="row">
+      <div><label>SFTP host</label><input type="text" name="host" required placeholder="s04hd.syd6.hostingplatform.net.au"></div>
+      <div style="flex:0 0 90px"><label>Port</label><input type="number" name="port" value="22"></div>
+    </div>
+    <label>Username (cPanel login)</label><input type="text" name="username" required placeholder="deploy">
+    <label>Remote root folder</label><input type="text" name="remoteRoot" required placeholder="/home/deploy/public_html">
+    <label>Default local folder</label><input type="text" name="localDir" placeholder="C:\Users\you\sites\mysite">
+    <label>Extra ignore patterns (comma separated, optional)</label><input type="text" name="ignore" placeholder="*.psd, drafts/">
+    <label>Private key file (optional — leave blank to use a password)</label><input type="text" name="privateKeyPath" placeholder="C:\Users\you\.ssh\id_ed25519">
+    <div class="actions">
+      <button value="cancel" type="button" id="siteCancel">Cancel</button>
+      <button value="delete" type="button" class="danger" id="siteDelete" style="display:none">Delete site</button>
+      <button value="forget" type="button" id="siteForget" style="display:none">Forget password</button>
+      <button value="ok" class="primary" type="submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="browseDlg">
+  <h3 id="browseTitle">Choose a folder</h3>
+  <div class="row"><input type="text" id="browsePath"><button id="browseGo">Go</button></div>
+  <div class="browse" id="browseList"></div>
+  <div class="actions"><button id="browseCancel">Cancel</button><button id="browseUse" class="primary">Use this folder</button></div>
+</dialog>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const state = { sites: [], site: null, plan: null, tab: 'upload', files: [], busy: false };
+  const fmtBytes = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(2) + ' MB';
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  async function api(method, path, body) {
+    const res = await fetch(path, { method, headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+    const json = await res.json().catch(() => ({ error: res.statusText }));
+    if (!res.ok) { const e = new Error(json.error || 'Request failed'); e.status = res.status; e.needPassword = json.needPassword; throw e; }
+    return json;
+  }
+
+  // ---- log
+  function log(msg, cls = '') {
+    const el = $('log'); const line = document.createElement('div'); if (cls) line.className = cls;
+    line.textContent = `${new Date().toLocaleTimeString()}  ${msg}`; el.appendChild(line); el.scrollTop = el.scrollHeight;
+  }
+  function setBar(p) { $('bar').style.width = Math.max(0, Math.min(100, p)) + '%'; }
+
+  // ---- password prompt
+  function askPassword(siteName, msg) {
+    return new Promise(resolve => {
+      $('pwSite').textContent = siteName; $('pwInput').value = '';
+      $('pwMsg').textContent = msg || 'Stored in your OS credential vault after the first successful login.';
+      const dlg = $('pwDlg');
+      dlg.onclose = () => resolve(dlg.returnValue === 'ok' ? $('pwInput').value : null);
+      dlg.showModal(); $('pwInput').focus();
+    });
+  }
+  /** run fn(); if the server wants a password, ask and retry once. */
+  async function withAuth(fn) {
+    try { return await fn(); }
+    catch (e) {
+      if (e.status !== 401 || !e.needPassword) throw e; // unreachable host or rejected key: a password won't help
+      let msg = e.needPassword ? (e.message === 'Password needed' ? '' : e.message) : e.message;
+      for (;;) {
+        const pw = await askPassword(state.site.name, msg);
+        if (pw == null) throw new Error('Cancelled');
+        try { await api('POST', '/api/connect', { site: state.site.name, password: pw }); log(`Connected to ${state.site.host} as ${state.site.username}`, 'ok'); return await fn(); }
+        catch (e2) { if (e2.status !== 401 || !e2.needPassword) throw e2; msg = e2.message; }
+      }
+    }
+  }
+
+  // ---- sites
+  async function loadSites() {
+    state.sites = (await api('GET', '/api/sites')).sites;
+    const box = $('sites'); box.innerHTML = '';
+    if (!state.sites.length) box.innerHTML = '<div class="empty">No sites yet.<br>Add your cPanel host.</div>';
+    for (const s of state.sites) {
+      const b = document.createElement('button'); b.className = 'site' + (state.site && state.site.name === s.name ? ' active' : '');
+      b.innerHTML = `${esc(s.name)}<small>${esc(s.username)}@${esc(s.host)}</small>`;
+      b.onclick = () => selectSite(s); box.appendChild(b);
+    }
+    if (!state.site && state.sites.length) selectSite(state.sites[0]);
+  }
+  function selectSite(s) {
+    state.site = s; state.plan = null; $('deploy').disabled = true;
+    $('localDir').value = s.localDir || ''; $('remoteDir').value = s.remoteRoot; $('upRemoteDir').value = s.remoteRoot;
+    $('conn').innerHTML = `<span class="ok-dot">●</span> ${esc(s.name)} · ${esc(s.username)}@${esc(s.host)}:${s.port}`;
+    $('planStatus').textContent = ''; $('tabs').innerHTML = ''; $('planList').innerHTML = '<div class="empty">Click Preview to see what would change.</div>';
+    for (const b of document.querySelectorAll('.site')) b.classList.toggle('active', b.textContent.startsWith(s.name));
+    localStorage.setItem('lastSite', s.name);
+    $('pull').disabled = true;
+    loadHistory();
+  }
+  function openSiteDialog(site) {
+    const f = $('siteForm'); f.reset();
+    $('siteDlgTitle').textContent = site ? `Edit ${site.name}` : 'Add site';
+    $('siteDelete').style.display = site ? '' : 'none'; $('siteForget').style.display = site ? '' : 'none';
+    f.name.readOnly = !!site;
+    if (site) { for (const k of ['name', 'host', 'port', 'username', 'remoteRoot', 'localDir', 'privateKeyPath']) f[k].value = site[k] ?? ''; f.ignore.value = (site.ignore || []).join(', '); }
+    $('siteDlg').showModal();
+  }
+  $('addSite').onclick = () => openSiteDialog(null);
+  $('editSite').onclick = () => state.site && openSiteDialog(state.site);
+  $('siteCancel').onclick = () => $('siteDlg').close();
+  $('siteForm').onsubmit = async e => {
+    e.preventDefault();
+    const f = e.target;
+    const body = { name: f.name.value.trim(), host: f.host.value.trim(), port: Number(f.port.value) || 22, username: f.username.value.trim(), remoteRoot: f.remoteRoot.value.trim(), localDir: f.localDir.value.trim(), privateKeyPath: f.privateKeyPath.value.trim(), ignore: f.ignore.value.split(',').map(s => s.trim()).filter(Boolean) };
+    try { const { site } = await api('POST', '/api/sites', body); $('siteDlg').close(); state.site = null; await loadSites(); selectSite(state.sites.find(s => s.name === site.name)); log(`Saved site ${site.name}`, 'ok'); }
+    catch (err) { alert(err.message); }
+  };
+  $('siteDelete').onclick = async () => { if (!confirm(`Delete site "${state.site.name}" and its stored password?`)) return; await api('DELETE', '/api/sites', { name: state.site.name }); $('siteDlg').close(); state.site = null; await loadSites(); };
+  $('siteForget').onclick = async () => { await api('POST', '/api/forget', { site: state.site.name }); log(`Forgot stored password for ${state.site.name}`, 'warn'); $('siteDlg').close(); };
+
+  // ---- folder browsers
+  function browse({ title, start, list, onPick }) {
+    return new Promise(resolve => {
+      const dlg = $('browseDlg'); $('browseTitle').textContent = title; $('browsePath').value = start;
+      let current = start;
+      const render = async () => {
+        $('browseList').innerHTML = '<div class="empty">Loading…</div>';
+        try {
+          const { dir, parent, dirs } = await list(current);
+          current = dir; $('browsePath').value = dir;
+          const box = $('browseList'); box.innerHTML = '';
+          if (parent && parent !== dir) { const b = document.createElement('button'); b.textContent = '↑ ..'; b.onclick = () => { current = parent; render(); }; box.appendChild(b); }
+          if (!dirs.length) box.insertAdjacentHTML('beforeend', '<div class="empty">No sub-folders</div>');
+          for (const d of dirs) { const b = document.createElement('button'); b.textContent = '📁 ' + d; b.onclick = () => { current = dir.replace(/[\\/]$/, '') + (dir.includes('\\') ? '\\' : '/') + d; render(); }; box.appendChild(b); }
+        } catch (e) { $('browseList').innerHTML = `<div class="empty bad">${esc(e.message)}</div>`; }
+      };
+      $('browseGo').onclick = () => { current = $('browsePath').value.trim(); render(); };
+      $('browsePath').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); $('browseGo').onclick(); } };
+      $('browseCancel').onclick = () => { dlg.close(); resolve(null); };
+      $('browseUse').onclick = () => { dlg.close(); resolve(current); };
+      dlg.showModal(); render();
+    });
+  }
+  const listLocal = async dir => api('GET', '/api/browse?dir=' + encodeURIComponent(dir));
+  const listRemote = async dir => withAuth(async () => {
+    const r = await api('GET', `/api/remote?site=${encodeURIComponent(state.site.name)}&dir=${encodeURIComponent(dir)}`);
+    return { dir: r.dir, parent: r.dir === '/' ? null : r.dir.replace(/\/[^/]+$/, '') || '/', dirs: r.entries.filter(e => e.type === 'dir').map(e => e.name) };
+  });
+  $('browseLocal').onclick = async () => { const d = await browse({ title: 'Choose local folder', start: $('localDir').value || (state.site && state.site.localDir) || '', list: listLocal }); if (d) $('localDir').value = d; };
+  $('browseRemote').onclick = async () => { if (!state.site) return; const d = await browse({ title: 'Choose folder on server', start: $('remoteDir').value || state.site.remoteRoot, list: listRemote }).catch(e => log(e.message, 'bad')); if (d) $('remoteDir').value = d; };
+  $('browseUpRemote').onclick = async () => { if (!state.site) return; const d = await browse({ title: 'Choose folder on server', start: $('upRemoteDir').value || state.site.remoteRoot, list: listRemote }).catch(e => log(e.message, 'bad')); if (d) $('upRemoteDir').value = d; };
+
+  // ---- preview
+  function renderPlan() {
+    const p = state.plan; if (!p) return;
+    const isPull = !!p.download;
+    const groups = { upload: p.upload || p.download, skip: p.skip.map(x => ({ path: x })), extra: p.extra.map(x => ({ path: x })), delete: p.delete.map(x => ({ path: x })) };
+    const labels = { upload: `${isPull ? 'Download' : 'Upload'} (${groups.upload.length})`, skip: `Unchanged (${p.skip.length})`, extra: `${isPull ? 'Only local' : 'Only on server'} (${p.extra.length})`, delete: `Will delete ${isPull ? 'locally' : ''} (${p.delete.length})` };
+    $('tabs').innerHTML = '';
+    for (const k of Object.keys(groups)) { if (k === 'delete' && !p.delete.length) continue; const b = document.createElement('button'); b.textContent = labels[k]; b.className = state.tab === k ? 'on' : ''; b.onclick = () => { state.tab = k; renderPlan(); }; $('tabs').appendChild(b); }
+    const rows = groups[state.tab] || [];
+    if (!rows.length) { $('planList').innerHTML = '<div class="empty">Nothing here.</div>'; return; }
+    $('planList').innerHTML = '<table>' + rows.map(r => `<tr><td>${esc(r.path)}</td><td class="r">${r.reason ? `<span class="pill ${r.reason}">${r.reason}</span>` : state.tab === 'delete' ? '<span class="pill delete">delete</span>' : ''}</td><td class="r">${r.size != null ? fmtBytes(r.size) : ''}</td></tr>`).join('') + '</table>';
+  }
+  function deployArgs() {
+    return { site: state.site.name, localDir: $('localDir').value.trim(), remoteDir: $('remoteDir').value.trim(), mirror: $('optMirror').checked, backup: $('optBackup').checked };
+  }
+  $('preview').onclick = async () => {
+    if (!state.site || state.busy) return;
+    state.busy = true; $('preview').disabled = true; $('deploy').disabled = true; $('planStatus').textContent = 'Scanning local folder and server…';
+    try {
+      const r = await withAuth(() => api('POST', '/api/preview', deployArgs()));
+      state.plan = r.plan; state.tab = 'upload'; renderPlan();
+      const n = r.plan.upload.filter(u => u.reason === 'new').length, c = r.plan.upload.length - n;
+      $('planStatus').innerHTML = `${r.localCount} local files · ${n} new, ${c} changed (${fmtBytes(r.plan.uploadBytes)}) · ${r.plan.skip.length} unchanged · ${r.plan.extra.length} only on server${r.plan.delete.length ? ` · <b class="bad-dot">${r.plan.delete.length} will be deleted</b>` : ''}${r.remoteExists ? '' : ' · <b>remote folder will be created</b>'}`;
+      log(`Preview: ${r.plan.upload.length} to upload, ${r.plan.skip.length} unchanged, ${r.plan.extra.length} extra on server`, 'info');
+      $('deploy').disabled = !(r.plan.upload.length || r.plan.delete.length);
+      if (!r.plan.upload.length && !r.plan.delete.length) $('planStatus').innerHTML += ' · <b class="ok-dot">server is already up to date</b>';
+    } catch (e) { $('planStatus').textContent = ''; log('Preview failed: ' + e.message, 'bad'); }
+    finally { state.busy = false; $('preview').disabled = false; }
+  };
+
+  // ---- deploy (SSE)
+  function follow(jobId, { total }) {
+    return new Promise(resolve => {
+      const es = new EventSource('/api/events/' + jobId);
+      let done = 0;
+      es.onmessage = m => {
+        const ev = JSON.parse(m.data);
+        switch (ev.type) {
+          case 'scan': log(`Scanning ${ev.side}: ${ev.dir}`, 'dim'); break;
+          case 'verify': log(`Checking ${ev.path} on server`, 'dim'); break;
+          case 'plan': log(`Plan: ${(ev.plan.upload || ev.plan.download).length} to ${ev.plan.upload ? 'upload' : 'download'}, ${ev.plan.delete.length} to delete`, 'info'); break;
+          case 'mkdir': log(`Created ${ev.path}`, 'info'); break;
+          case 'backup': log(`Backed up ${ev.path} → ${ev.to}`, 'warn'); break;
+          case 'upload': done = ev.done; setBar(100 * ev.done / (ev.total || total || 1)); log(`↑ ${ev.path} (${fmtBytes(ev.bytes)}) ${ev.done}/${ev.total}`, 'ok'); break;
+          case 'download': done = ev.done; setBar(100 * ev.done / (ev.total || total || 1)); log(`↓ ${ev.path} (${fmtBytes(ev.bytes)}) ${ev.done}/${ev.total}`, 'ok'); break;
+          case 'delete': log(`✕ deleted ${ev.path}`, 'bad'); break;
+          case 'manifest': log(`Wrote ${ev.path} (${ev.count} files)`, 'dim'); break;
+          case 'done': setBar(100); es.close(); resolve({ ok: true, summary: ev.summary }); break;
+          case 'error': log('ERROR: ' + ev.message, 'bad'); es.close(); resolve({ ok: false, summary: ev.summary }); break;
+        }
+      };
+      es.onerror = () => { es.close(); resolve({ ok: false }); };
+    });
+  }
+  $('deploy').onclick = async () => {
+    if (!state.site || !state.plan || !state.plan.upload || state.busy) return;
+    const a = deployArgs();
+    if (a.mirror && state.plan.delete.length && !confirm(`Mirror is on: ${state.plan.delete.length} file(s) will be DELETED on the server${a.backup ? ' (backed up first)' : ' with NO backup'}. Continue?`)) return;
+    state.busy = true; $('deploy').disabled = true; $('preview').disabled = true; setBar(0); $('summary').textContent = '';
+    log(`Deploying ${a.localDir} → ${state.site.host}:${a.remoteDir}${a.backup ? '' : ' (no backup)'}`, 'info');
+    try {
+      const { jobId } = await withAuth(() => api('POST', '/api/deploy', a));
+      const r = await follow(jobId, { total: state.plan.upload.length });
+      if (r.ok) { const s = r.summary; $('summary').innerHTML = `<span class="ok-dot">✔</span> Uploaded ${s.uploaded.length} file(s), ${fmtBytes(s.bytes)}${s.backedUp.length ? ` · backed up ${s.backedUp.length} to ${esc(s.backupDir)}` : ''}${s.deleted.length ? ` · deleted ${s.deleted.length}` : ''}`; log('Deploy complete', 'ok'); loadHistory(); state.plan = null; $('planStatus').textContent = 'Deployed. Preview again to confirm the server is up to date.'; }
+      else $('summary').innerHTML = `<span class="bad-dot">✘</span> Deploy stopped with an error — see log. Nothing already uploaded is rolled back; backups are in place.`;
+    } catch (e) { log('Deploy failed: ' + e.message, 'bad'); }
+    finally { state.busy = false; $('preview').disabled = false; }
+  };
+
+  // ---- pull (server → local)
+  $('pullPreview').onclick = async () => {
+    if (!state.site || state.busy) return;
+    state.busy = true; $('pull').disabled = true; $('deploy').disabled = true; $('planStatus').textContent = 'Comparing server against local folder…';
+    try {
+      const { jobId } = await withAuth(() => api('POST', '/api/pull', { ...deployArgs(), dryRun: true }));
+      const r = await follow(jobId, {});
+      if (!r.ok) throw new Error('see log');
+      state.plan = r.summary.plan; state.tab = 'upload'; renderPlan();
+      const p = state.plan, n = p.download.filter(d => d.reason === 'new').length;
+      $('planStatus').innerHTML = `Pull: ${n} new, ${p.download.length - n} changed on server (${fmtBytes(p.downloadBytes)}) · ${p.skip.length} unchanged · ${p.extra.length} only local${p.delete.length ? ` · <b class="bad-dot">${p.delete.length} local files will be deleted</b>` : ''}${!p.download.length && !p.delete.length ? ' · <b class="ok-dot">local folder already matches the server</b>' : ''}`;
+      $('pull').disabled = !(p.download.length || p.delete.length);
+    } catch (e) { $('planStatus').textContent = ''; log('Pull preview failed: ' + e.message, 'bad'); }
+    finally { state.busy = false; }
+  };
+  $('pull').onclick = async () => {
+    if (!state.site || !state.plan || !state.plan.download || state.busy) return;
+    const a = deployArgs();
+    const msg = `Pull ${state.plan.download.length} file(s) from the server into\n${a.localDir}\n${a.backup ? 'Overwritten local files are copied to _backup-<time>\\ first.' : 'NO local backup.'}${a.mirror && state.plan.delete.length ? `\n${state.plan.delete.length} local file(s) not on the server will be DELETED.` : ''}\nContinue?`;
+    if (!confirm(msg)) return;
+    state.busy = true; $('pull').disabled = true; setBar(0); $('summary').textContent = '';
+    log(`Pulling ${state.site.host}:${a.remoteDir} → ${a.localDir}`, 'info');
+    try {
+      const { jobId } = await withAuth(() => api('POST', '/api/pull', a));
+      const r = await follow(jobId, { total: state.plan.download.length });
+      if (r.ok) { const s = r.summary; $('summary').innerHTML = `<span class="ok-dot">✔</span> Downloaded ${s.downloaded.length} file(s), ${fmtBytes(s.bytes)}${s.backedUp.length ? ` · ${s.backedUp.length} local file(s) backed up to ${esc(s.backupDir)}` : ''}${s.deleted.length ? ` · deleted ${s.deleted.length} locally` : ''}`; log('Pull complete', 'ok'); state.plan = null; $('planStatus').textContent = 'Pulled. Local folder now matches the server.'; loadHistory(); }
+      else $('summary').innerHTML = `<span class="bad-dot">✘</span> Pull stopped with an error — see log.`;
+    } catch (e) { log('Pull failed: ' + e.message, 'bad'); }
+    finally { state.busy = false; }
+  };
+
+  // ---- history
+  async function loadHistory() {
+    try {
+      const { history, file } = await api('GET', '/api/history?limit=25' + (state.site ? '&site=' + encodeURIComponent(state.site.name) : ''));
+      $('histFile').textContent = file;
+      if (!history.length) { $('history').innerHTML = '<div class="empty">Nothing recorded yet.</div>'; return; }
+      $('history').innerHTML = '<table>' + history.map(h => {
+        const n = h.action === 'pull' ? (h.downloaded || []).length + ' ↓' : (h.uploaded || []).length + ' ↑';
+        const when = new Date(h.at).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+        return `<tr><td class="r">${esc(when)}</td><td>${h.ok ? '<span class="ok-dot">●</span>' : '<span class="bad-dot">●</span>'} ${esc(h.action)}<span class="dim"> · ${esc(h.trigger)}</span>${h.error ? `<br><span class="bad-dot">${esc(h.error)}</span>` : ''}</td><td class="r">${n}${h.deleted && h.deleted.length ? `, ${h.deleted.length} ✕` : ''}</td><td class="r">${h.bytes ? fmtBytes(h.bytes) : ''}</td></tr>`;
+      }).join('') + '</table>';
+    } catch (e) { $('history').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  }
+  $('histRefresh').onclick = loadHistory;
+
+  // ---- quick upload
+  const drop = $('drop');
+  drop.onclick = () => $('fileInput').click();
+  $('fileInput').onchange = e => addFiles(e.target.files);
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+  drop.ondragleave = () => drop.classList.remove('over');
+  drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); addFiles(e.dataTransfer.files); };
+  function addFiles(list) { for (const f of list) if (!state.files.some(x => x.name === f.name)) state.files.push(f); renderChips(); }
+  function renderChips() { $('chips').innerHTML = state.files.map(f => `<span class="chip">${esc(f.name)} · ${fmtBytes(f.size)}</span>`).join(''); $('upload').disabled = !state.files.length || !state.site; }
+  $('clearFiles').onclick = () => { state.files = []; renderChips(); };
+  $('upload').onclick = async () => {
+    if (!state.site || !state.files.length || state.busy) return;
+    state.busy = true; $('upload').disabled = true; setBar(0);
+    const remoteDir = $('upRemoteDir').value.trim() || state.site.remoteRoot;
+    log(`Uploading ${state.files.length} file(s) → ${remoteDir}`, 'info');
+    try {
+      const r = await withAuth(async () => {
+        const fd = new FormData(); fd.append('site', state.site.name); fd.append('remoteDir', remoteDir); fd.append('backup', String($('optBackup').checked));
+        for (const f of state.files) fd.append('files', f, f.name);
+        const res = await fetch('/api/upload', { method: 'POST', body: fd });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) { const e = new Error(json.error || res.statusText); e.status = res.status; e.needPassword = json.needPassword; throw e; }
+        return json;
+      });
+      const out = await follow(r.jobId, { total: state.files.length });
+      if (out.ok) { log('Upload complete', 'ok'); loadHistory(); $('summary').innerHTML = `<span class="ok-dot">✔</span> Uploaded ${out.summary.uploaded.length} file(s) to ${esc(remoteDir)}${out.summary.backedUp.length ? ` · backed up ${out.summary.backedUp.length}` : ''}`; state.files = []; renderChips(); }
+    } catch (e) { log('Upload failed: ' + e.message, 'bad'); }
+    finally { state.busy = false; renderChips(); }
+  };
+
+  // ---- boot
+  (async () => {
+    try { const s = await api('GET', '/api/status'); $('credNote').textContent = s.credentials; $('queueDir').textContent = s.queueDir; if (/memory/i.test(s.credentials)) log(s.credentials, 'warn'); } catch {}
+    await loadSites();
+    const last = localStorage.getItem('lastSite'); const s = state.sites.find(x => x.name === last); if (s) selectSite(s);
+    if (!state.sites.length) openSiteDialog(null);
+  })();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,50 @@
+{
+  "name": "shipback-sftp",
+  "version": "0.1.0",
+  "description": "SFTP deploys to shared hosting that you, a script or an AI agent can undo: backup before every overwrite, one-command restore that won't clobber live edits, and an MCP server.",
+  "keywords": [
+    "sftp",
+    "deploy",
+    "cpanel",
+    "shared-hosting",
+    "backup",
+    "rollback",
+    "mcp",
+    "mcp-server",
+    "claude-code",
+    "ai-agents"
+  ],
+  "author": "Aldo Hushi",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aldohushi1-stack/shipback-sftp.git"
+  },
+  "main": "src/deploy.js",
+  "bin": {
+    "shipback": "bin/cli.js",
+    "shipback-mcp": "bin/mcp.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "ui/",
+    "start.bat",
+    "sites.example.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test \"test/*.test.js\"",
+    "deploy": "node bin/cli.js",
+    "mcp": "node bin/mcp.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@napi-rs/keyring": "^2.1.0",
+    "ssh2": "^1.17.0"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "sites": [
+    {
+      "name": "mysite",
+      "host": "server123.example-host.com",
+      "port": 22,
+      "username": "cpaneluser",
+      "remoteRoot": "/home/cpaneluser/public_html",
+      "localDir": "/Users/you/sites/mysite",
+      "ignore": ["drafts/", "*.psd"]
+    }
+  ]
+}

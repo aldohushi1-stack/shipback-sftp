@@ -1,0 +1,5 @@
+node_modules/
+sites.json
+deploys.jsonl
+queue/
+_backup-*/
