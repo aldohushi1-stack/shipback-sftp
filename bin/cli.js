@@ -78,7 +78,10 @@ function ask(q, hidden) {
   const remoteRoot = args.remote || site.remoteRoot;
   if (!localDir && !args.prune && !args.restore && !args.backups) { console.error('No local folder: pass --local DIR or set localDir on the site'); process.exit(1); }
 
-  const { store, note } = createCredentialStore();
+  // Open the OS keychain only when a password has to come from it (or be saved to it): a --password or
+  // SFTP_PASSWORD run, like CI, never touches the vault.
+  const needsStore = !site.privateKeyPath && args.password == null && !process.env.SFTP_PASSWORD;
+  const { store, note } = needsStore ? createCredentialStore() : {};
   let password = args.password ?? process.env.SFTP_PASSWORD ?? (site.privateKeyPath ? '' : await store.get(site.name));
   if (password == null) { password = await ask(`Password for ${site.username}@${site.host}: `, true); }
 
@@ -88,7 +91,7 @@ function ask(q, hidden) {
   let rfs;
   try { rfs = await SftpRemoteFs.connect(opts); } catch (e) { console.error('\n' + e.message); process.exit(2); }
   console.log('ok');
-  if (!site.privateKeyPath && args.password == null && !process.env.SFTP_PASSWORD && (await store.get(site.name)) == null) { await store.set(site.name, password); console.log(note); }
+  if (needsStore && (await store.get(site.name)) == null) { await store.set(site.name, password); console.log(note); }
 
   const fmt = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(2) + ' MB';
   const action = args.backups ? 'backups' : args.restore ? 'restore' : args.prune ? 'prune' : args.pull ? 'pull' : 'deploy';

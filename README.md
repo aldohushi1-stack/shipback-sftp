@@ -1,5 +1,7 @@
 # Shipback SFTP
 
+[![test](https://github.com/aldohushi1-stack/shipback-sftp/actions/workflows/test.yml/badge.svg)](https://github.com/aldohushi1-stack/shipback-sftp/actions/workflows/test.yml)
+
 **Let the agent deploy. Keep the undo.**
 
 It's late, and the agent says "Deployed ✓". Then the client's contact form is gone. The agent overwrote a

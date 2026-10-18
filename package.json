@@ -36,7 +36,7 @@
   ],
   "scripts": {
     "start": "node src/server.js",
-    "test": "node --test \"test/*.test.js\"",
+    "test": "node test/run.js",
     "deploy": "node bin/cli.js",
     "mcp": "node bin/mcp.js"
   },
