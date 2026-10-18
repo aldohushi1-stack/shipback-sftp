@@ -1,0 +1,13 @@
+# Weekly PRs for dependency updates. ssh2 and @napi-rs/keyring handle passwords and connections,
+# so their security fixes should show up without anyone watching for them.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

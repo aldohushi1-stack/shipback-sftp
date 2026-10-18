@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security problem privately
+    url: https://github.com/aldohushi1-stack/shipback-sftp/security/advisories/new
+    about: Passwords, file deletion, restore safety or the local app. Please don't open a public issue.
