@@ -68,6 +68,15 @@ async function createApp(opts = {}) {
     for (const l of job.listeners) l(ev);
     if (ev.type === 'done' || ev.type === 'error') job.done = true;
   }
+  // Runs a UI job, holding back its last event ('done' / 'error') until the history line is written:
+  // the UI reloads history on 'done', so the run has to be on file by then.
+  function track(job, run, rec) {
+    let last = null;
+    const onEvent = ev => { if (ev.type === 'done' || ev.type === 'error') last = ev; else emit(job, ev); };
+    return run(onEvent)
+      .then(summary => rec(summary), err => rec(last && last.summary, err))
+      .finally(() => { if (last) emit(job, last); });
+  }
 
   async function getSite(name) {
     const { sites } = await loadSites(sitesFile);
@@ -125,9 +134,9 @@ async function createApp(opts = {}) {
       const job = newJob('deploy');
       const args = { localDir: body.localDir || site.localDir, remoteRoot: body.remoteDir || site.remoteRoot };
       const startedAt = new Date().toISOString();
-      runDeploy({ ...args, remoteFs: rfs, dryRun: !!body.dryRun, backup: body.backup !== false, mirror: !!body.mirror, ignore: site.ignore, now: now(), onEvent: ev => emit(job, ev) })
-        .then(summary => { if (!summary.dryRun) record({ action: 'deploy', site: site.name, trigger: 'ui', localDir: args.localDir, remoteDir: args.remoteRoot, startedAt, summary }); },
-              err => record({ action: 'deploy', site: site.name, trigger: 'ui', localDir: args.localDir, remoteDir: args.remoteRoot, startedAt, summary: job.events.find(e => e.type === 'error')?.summary, error: err.message }))
+      track(job, onEvent => runDeploy({ ...args, remoteFs: rfs, dryRun: !!body.dryRun, backup: body.backup !== false, mirror: !!body.mirror, ignore: site.ignore, now: now(), onEvent }),
+        (summary, err) => err ? record({ action: 'deploy', site: site.name, trigger: 'ui', localDir: args.localDir, remoteDir: args.remoteRoot, startedAt, summary, error: err.message })
+          : !summary.dryRun && record({ action: 'deploy', site: site.name, trigger: 'ui', localDir: args.localDir, remoteDir: args.remoteRoot, startedAt, summary }))
         .finally(() => rfs.close());
       return { jobId: job.id };
     },
@@ -139,9 +148,9 @@ async function createApp(opts = {}) {
       const args = { localDir: body.localDir || site.localDir, remoteRoot: body.remoteDir || site.remoteRoot };
       if (!args.localDir) throw new HttpError(400, 'No local folder given');
       const startedAt = new Date().toISOString();
-      runPull({ ...args, remoteFs: rfs, dryRun: !!body.dryRun, backup: body.backup !== false, mirror: !!body.mirror, ignore: site.ignore, now: now(), onEvent: ev => emit(job, ev) })
-        .then(summary => { if (!summary.dryRun) record({ action: 'pull', site: site.name, trigger: 'ui', localDir: args.localDir, remoteDir: args.remoteRoot, startedAt, summary }); },
-              err => record({ action: 'pull', site: site.name, trigger: 'ui', localDir: args.localDir, remoteDir: args.remoteRoot, startedAt, error: err.message }))
+      track(job, onEvent => runPull({ ...args, remoteFs: rfs, dryRun: !!body.dryRun, backup: body.backup !== false, mirror: !!body.mirror, ignore: site.ignore, now: now(), onEvent }),
+        (summary, err) => err ? record({ action: 'pull', site: site.name, trigger: 'ui', localDir: args.localDir, remoteDir: args.remoteRoot, startedAt, error: err.message })
+          : !summary.dryRun && record({ action: 'pull', site: site.name, trigger: 'ui', localDir: args.localDir, remoteDir: args.remoteRoot, startedAt, summary }))
         .finally(() => rfs.close());
       return { jobId: job.id };
     },
@@ -165,9 +174,8 @@ async function createApp(opts = {}) {
       const rfs = await connectSite(site);
       const job = newJob('upload');
       const startedAt = new Date().toISOString();
-      uploadFiles({ files, remoteDir, remoteFs: rfs, backup: form.get('backup') !== 'false', now: now(), onEvent: ev => emit(job, ev) })
-        .then(summary => record({ action: 'upload', site: site.name, trigger: 'ui', remoteDir, startedAt, summary }),
-              err => record({ action: 'upload', site: site.name, trigger: 'ui', remoteDir, startedAt, error: err.message }))
+      track(job, onEvent => uploadFiles({ files, remoteDir, remoteFs: rfs, backup: form.get('backup') !== 'false', now: now(), onEvent }),
+        (summary, err) => record({ action: 'upload', site: site.name, trigger: 'ui', remoteDir, startedAt, ...(err ? { error: err.message } : { summary }) }))
         .finally(async () => { await rfs.close(); await fs.rm(tmp, { recursive: true, force: true }); });
       return { jobId: job.id, files: files.map(f => f.name) };
     },

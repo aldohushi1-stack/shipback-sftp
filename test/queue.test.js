@@ -26,7 +26,9 @@ test('a request file is picked up, run, and answered with result.json + log.txt;
   const ran = [];
   const { queueDir, w } = await setup(t, async ({ request, onEvent }) => { ran.push(request); onEvent({ type: 'upload', path: 'index.html', done: 1, total: 1 }); return { uploaded: ['index.html'], bytes: 5 }; });
   await fs.writeFile(path.join(queueDir, 'job1' + QUEUE_SUFFIX), JSON.stringify({ action: 'deploy', site: 'mysite', localDir: 'C:\\x', note: 'homepage' }));
-  const result = await waitFor(() => readJson(path.join(queueDir, 'job1.result.json')).catch(() => null));
+  // The rename to .done is the watcher's last step (after log.txt and result.json), so wait for that.
+  await waitFor(() => fs.stat(path.join(queueDir, 'job1.request.done.json')).catch(() => null));
+  const result = await readJson(path.join(queueDir, 'job1.result.json'));
   assert.equal(result.ok, true); assert.equal(result.action, 'deploy'); assert.equal(result.site, 'mysite');
   assert.deepEqual(result.summary.uploaded, ['index.html']);
   assert.ok(result.startedAt && result.finishedAt);
