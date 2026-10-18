@@ -36,12 +36,15 @@ test('a closed port is refused with the same hint', async () => {
 
 test('a rejected key says the key was rejected, not "check username/password"', async () => {
   const fs = require('node:fs/promises'); const os = require('node:os'); const path = require('node:path');
-  const { utils } = require('ssh2');
   const { start } = require('./helpers/sftp-server');
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sd-key-'));
   const srv = await start({ root, username: 'deploy', password: 'secret' }); // password-only server
   try {
-    const { private: privateKey } = utils.generateKeyPairSync('ed25519');
+    // An RSA key from node:crypto, not ssh2's utils.generateKeyPairSync('ed25519'): about 1 in 270 of
+    // those fails ssh2's own parser ("Malformed OpenSSH private key"), which failed CI run #4.
+    const privateKey = require('node:crypto').generateKeyPairSync('rsa', {
+      modulusLength: 2048, privateKeyEncoding: { type: 'pkcs1', format: 'pem' }, publicKeyEncoding: { type: 'pkcs1', format: 'pem' },
+    }).privateKey;
     await assert.rejects(
       SftpRemoteFs.connect({ host: '127.0.0.1', port: srv.port, username: 'deploy', privateKey, readyTimeout: 5000 }),
       err => {
