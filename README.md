@@ -23,8 +23,8 @@ any MCP client.
 - **Spots the drift.** `--pull --dry-run` shows what changed on the server since your last deploy, so
   edits made live in cPanel don't get overwritten by accident.
 
-No git or SSH shell is needed on the server, just SFTP. It needs Node 18+. It's built for Windows, macOS
-and Linux, but so far it has only been tested on Windows. Passwords are kept in the OS keychain and never
+No git or SSH shell is needed on the server, just SFTP. It needs Node 18+. The tests run on Windows, macOS
+and Linux with Node 18, 20 and 22 on every push. Passwords are kept in the OS keychain and never
 pass through the model.
 
 **It has run in production.** The deploy engine underneath has shipped [aldo.today](https://aldo.today) 235 times
