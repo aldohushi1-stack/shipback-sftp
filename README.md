@@ -33,17 +33,18 @@ since September 2026 (2,907 files to a cPanel host). Restore and the MCP server 
 ## Quick start
 
 ```bash
-git clone https://github.com/aldohushi1-stack/shipback-sftp.git
-cd shipback-sftp
-npm install
-cp sites.example.json sites.json      # then edit it
-node bin/cli.js mysite --dry-run      # see the plan; asks for the password once and stores it
-node bin/cli.js mysite                # deploy
-node bin/cli.js mysite --restore      # changed your mind? undo it
+npm install -g shipback-sftp          # installs the shipback and shipback-mcp commands
+cd ~/sites                            # any folder with a sites.json in it (format below)
+shipback mysite --dry-run             # see the plan; asks for the password once and stores it
+shipback mysite                       # deploy
+shipback mysite --restore             # changed your mind? undo it
 ```
 
-`npm link` in the folder installs it as the `shipback` and `shipback-mcp` commands, so `node bin/cli.js mysite`
-becomes `shipback mysite`.
+No global install? `npx -p shipback-sftp shipback mysite --dry-run` works the same way. `--sites <file>`
+points at a `sites.json` in another folder.
+
+From source: `git clone https://github.com/aldohushi1-stack/shipback-sftp.git`, `npm install`, then
+`node bin/cli.js` wherever these docs say `shipback`.
 
 `sites.json`, one entry per site:
 
@@ -70,16 +71,16 @@ first. Use `"privateKeyPath"` instead of a password if your host has your key.
 ## Commands
 
 ```bash
-node bin/cli.js <site> --dry-run                 # what a deploy would upload
-node bin/cli.js <site>                           # deploy: backup, upload, record
-node bin/cli.js <site> --local <folder>          # deploy a different folder than localDir
-node bin/cli.js <site> --pull --dry-run          # what changed on the server since the last deploy?
-node bin/cli.js <site> --pull                    # bring those changes down (local copies backed up first)
-node bin/cli.js <site> --backups                 # list backups: what each run overwrote, added, deleted
-node bin/cli.js <site> --restore --dry-run       # what an undo of the latest deploy would do
-node bin/cli.js <site> --restore [<backup>]      # undo it (or name an older _backup-… folder)
-node bin/cli.js <site> --prune --keep 10         # tidy old backups; refuses any holding the only copy of a file
-node bin/cli.js --history [site]                 # what went up, when, from where
+shipback <site> --dry-run                 # what a deploy would upload
+shipback <site>                           # deploy: backup, upload, record
+shipback <site> --local <folder>          # deploy a different folder than localDir
+shipback <site> --pull --dry-run          # what changed on the server since the last deploy?
+shipback <site> --pull                    # bring those changes down (local copies backed up first)
+shipback <site> --backups                 # list backups: what each run overwrote, added, deleted
+shipback <site> --restore --dry-run       # what an undo of the latest deploy would do
+shipback <site> --restore [<backup>]      # undo it (or name an older _backup-… folder)
+shipback <site> --prune --keep 10         # tidy old backups; refuses any holding the only copy of a file
+shipback --history [site]                 # what went up, when, from where
 ```
 
 Add `--json` to any command for machine-readable output. A refused restore exits with code 4.
@@ -111,12 +112,12 @@ Backup folders are skipped by deploys and pulls, and are never deleted except by
 
 ## Use it from an AI agent (MCP)
 
-`bin/mcp.js` is an MCP server over stdio.
+`shipback-mcp` (`bin/mcp.js`) is an MCP server over stdio.
 
 **Claude Code**
 
 ```bash
-claude mcp add shipback-sftp -- node /path/to/shipback-sftp/bin/mcp.js --sites /path/to/sites.json
+claude mcp add shipback-sftp -- npx -y -p shipback-sftp shipback-mcp --sites /path/to/sites.json
 ```
 
 **Cursor, Claude Desktop, and others** (`mcp.json` / `claude_desktop_config.json`):
@@ -125,14 +126,18 @@ claude mcp add shipback-sftp -- node /path/to/shipback-sftp/bin/mcp.js --sites /
 {
   "mcpServers": {
     "shipback-sftp": {
-      "command": "node",
-      "args": ["/path/to/shipback-sftp/bin/mcp.js", "--sites", "/path/to/sites.json"]
+      "command": "npx",
+      "args": ["-y", "-p", "shipback-sftp", "shipback-mcp", "--sites", "/path/to/sites.json"]
     }
   }
 }
 ```
 
-Run any CLI command for a site once first (for example `node bin/cli.js mysite --backups`). That stores
+On Windows, if the client can't start `npx`, use `"command": "cmd"` with `"/c", "npx"` at the front of
+`args`. After a global install, `"command": "shipback-mcp"` works too, and from a clone it's `node` with
+`bin/mcp.js` as the first arg.
+
+Run any CLI command for a site once first (for example `shipback mysite --backups`). That stores
 the password in the OS keychain, where the MCP server reads it. The model never sees it. For CI you can set
 `SFTP_PASSWORD` in the server's environment instead.
 
@@ -172,7 +177,8 @@ one-off uploads, browse the server, and see history. It only answers requests fr
 
 If Claude also runs the CLI directly, add `bin/claude-guard.js` as a PreToolUse hook. It blocks
 `--mirror` and `--no-backup` in shell commands, queue files and API calls, and tells Claude why. You can
-still run them yourself in a terminal.
+still run them yourself in a terminal. After `npm install -g shipback-sftp`, the file is in the folder
+`npm root -g` prints, under `shipback-sftp/bin/`.
 
 ```json
 {
