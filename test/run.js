@@ -1,8 +1,8 @@
 'use strict';
 // `npm test`: run every test/*.test.js with node:test. Node 18 and 20 don't expand globs passed to
 // --test (that arrived in Node 21) and npm doesn't either, so list the files here.
-// A test that hangs fails after 60 s instead of stalling the run, and on GitHub Actions each failure
-// becomes an annotation, so it shows on the run page without signing in to read the log.
+// A test that hangs fails after 60 s instead of stalling the run (Node 20.11+; Node 18 has no --test-timeout),
+// and on GitHub Actions each failure becomes an annotation, so it shows on the run page without signing in.
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -10,7 +10,7 @@ const path = require('node:path');
 const files = fs.readdirSync(__dirname).filter(f => f.endsWith('.test.js')).sort().map(f => path.join(__dirname, f));
 const [major, minor] = process.versions.node.split('.').map(Number);
 const flags = [];
-if (major >= 22 || (major === 21 && minor >= 2) || (major === 20 && minor >= 11) || (major === 18 && minor >= 19)) flags.push('--test-timeout=60000');
+if (major >= 22 || (major === 21 && minor >= 2) || (major === 20 && minor >= 11)) flags.push('--test-timeout=60000');
 if (major >= 22 || (major === 20 && minor >= 14)) flags.push('--test-force-exit'); // a leaked timer or socket can't keep the run open
 
 const gha = !!process.env.GITHUB_ACTIONS;
