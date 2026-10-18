@@ -181,8 +181,16 @@ test('stdio: bin/mcp.js speaks newline-delimited JSON-RPC and deploys over real 
     let i;
     while ((i = buf.indexOf('\n')) >= 0) { const m = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1); pending.get(m.id)?.(m); }
   });
+  // If the server dies, fail the waiting calls with its stderr instead of waiting forever.
+  let stderr = '', exited = null;
+  child.stderr.setEncoding('utf8'); child.stderr.on('data', d => { stderr += d; });
+  child.on('exit', code => { exited = new Error(`bin/mcp.js exited (${code}): ${stderr}`); for (const r of pending.values()) r(exited); });
   let id = 0;
-  const rpc = (method, params) => new Promise(resolve => { const n = ++id; pending.set(n, resolve); child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: n, method, params }) + '\n'); });
+  const rpc = (method, params) => new Promise((resolve, reject) => {
+    if (exited) return reject(exited);
+    const n = ++id; pending.set(n, m => (m instanceof Error ? reject(m) : resolve(m)));
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: n, method, params }) + '\n');
+  });
   const tool = async (name, args) => JSON.parse((await rpc('tools/call', { name, arguments: args })).result.content[0].text);
   try {
     assert.equal((await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } })).result.serverInfo.name, 'shipback-sftp');
@@ -194,7 +202,7 @@ test('stdio: bin/mcp.js speaks newline-delimited JSON-RPC and deploys over real 
     assert.equal(await fs.readFile(path.join(P, 'index.html'), 'utf8'), 'NEW');
   } finally {
     child.stdin.end();
-    await new Promise(r => child.on('close', r));
+    if (child.exitCode === null) await new Promise(r => child.on('close', r));
     await srv.close();
   }
 });
