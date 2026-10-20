@@ -2,7 +2,7 @@
 
 [![test](https://github.com/aldohushi1-stack/shipback-sftp/actions/workflows/test.yml/badge.svg)](https://github.com/aldohushi1-stack/shipback-sftp/actions/workflows/test.yml)
 
-**Let the agent deploy. Keep the undo.**
+**SFTP deploys you can take back.**
 
 It's late, and the agent says "Deployed ✓". Then the client's contact form is gone. The agent overwrote a
 file someone had fixed by hand in cPanel last week, and shared hosting has no `git revert`.
