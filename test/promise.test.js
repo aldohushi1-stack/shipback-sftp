@@ -287,3 +287,47 @@ test('P13 undo never touches anything outside the site folder, even if a backup 
   await assert.rejects(runRestore({ remoteRoot: ROOT, remoteFs: remote, now: T2, force: true }), /damaged/);
   assert.equal(JSON.stringify(remote.dump()), snapshot);
 });
+
+test('P13 nor through a symlink: deploy and undo refuse to write through a symlinked folder or over a special file', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sb-promise-link-'));
+  const P = path.join(root, 'home/deploy/public_html'), OUT = path.join(root, 'home/deploy/outside');
+  await fs.mkdir(P, { recursive: true });
+  await fs.mkdir(OUT, { recursive: true });
+  await fs.writeFile(path.join(OUT, 'secret.txt'), 'NOT THE SITE');
+  await fs.writeFile(path.join(P, 'index.html'), 'OLD');
+  await fs.symlink(OUT, path.join(P, 'escape'), 'junction'); // a junction on Windows, a plain symlink elsewhere
+  const srv = await start({ root, username: 'deploy', password: 'secret' });
+  const rfs = await SftpRemoteFs.connect({ host: '127.0.0.1', port: srv.port, username: 'deploy', password: 'secret' });
+  const outside = () => fs.readFile(path.join(OUT, 'secret.txt'), 'utf8');
+  try {
+    // a deploy that would write under the symlink is refused before anything changes, even in a dry run
+    const local = await tmpTree({ 'index.html': 'NEW', 'escape/secret.txt': 'OVERWRITTEN' });
+    await assert.rejects(runDeploy({ localDir: local, remoteRoot: ROOT, remoteFs: rfs, now: T1, dryRun: true }), /escape is a symlink/);
+    await assert.rejects(runDeploy({ localDir: local, remoteRoot: ROOT, remoteFs: rfs, now: T1 }), /escape is a symlink.*Nothing was changed/);
+    assert.equal(await outside(), 'NOT THE SITE');
+    assert.equal(await fs.readFile(path.join(P, 'index.html'), 'utf8'), 'OLD');
+
+    // a record tampered to point under the symlink: undo skips that path even with --force
+    const safe = await tmpTree({ 'index.html': 'NEW' });
+    const s1 = await runDeploy({ localDir: safe, remoteRoot: ROOT, remoteFs: rfs, now: T1 });
+    const recPath = path.join(P, s1.backupDir.split('/').pop(), '.backup.json');
+    const rec = JSON.parse(await fs.readFile(recPath, 'utf8'));
+    rec.added.push({ path: 'escape/secret.txt', sha256: require('node:crypto').createHash('sha256').update('NOT THE SITE').digest('hex') });
+    await fs.writeFile(recPath, JSON.stringify(rec));
+    const dry = await runRestore({ remoteRoot: ROOT, remoteFs: rfs, dryRun: true });
+    assert.ok(dry.conflicts.some(c => c.path === 'escape/secret.txt' && /symlink/.test(c.why)));
+    const s = await runRestore({ remoteRoot: ROOT, remoteFs: rfs, now: T2, force: true });
+    assert.ok(!s.remove.includes('escape/secret.txt'));
+    assert.equal(await outside(), 'NOT THE SITE', 'the file outside the site is still there');
+    assert.equal(await fs.readFile(path.join(P, 'index.html'), 'utf8'), 'OLD', 'the rest of the undo still happened');
+  } finally { await rfs.close(); await srv.close(); }
+
+  // a symlinked file, and a special file (in memory: the test server can't make a FIFO on Windows)
+  const remote = new MemoryRemoteFs();
+  await remote.mkdirp(ROOT);
+  remote.odd.set(`${ROOT}/link.html`, 'link');
+  remote.odd.set(`${ROOT}/pipe`, 'fifo');
+  const local2 = await tmpTree({ 'link.html': 'X', 'pipe': 'Y' });
+  await assert.rejects(runDeploy({ localDir: local2, remoteRoot: ROOT, remoteFs: remote, now: T1 }), /link\.html is a symlink|pipe is a special file/);
+  assert.equal(await remote.stat(`${ROOT}/link.html`), null, 'nothing was written');
+});

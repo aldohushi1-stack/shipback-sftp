@@ -3,6 +3,7 @@
 //   stat(p) → { size, mtime(ms), isDir } | null
 //   listRecursive(dir, { skipDir }) → [{ path (posix, relative to dir), size, mtime(ms) }]  (files only)
 //   mkdirp(p) · readFile(p) → Buffer · writeFile(p, Buffer) · uploadFile(localPath, p)
+//   lstat(p) → { isDir, isFile, isLink } | null (does not follow symlinks)
 //   rename(a, b) · replace(tmp, dest) · remove(p) · rmdir(p) · close()
 //
 // Live files are never written in place: the new copy goes to partPath(dest) and replace() swaps it in, so a
@@ -21,7 +22,15 @@ const isHidden = rel => isPart(rel) || rel === LOCK_NAME; // Shipback's own work
 // ---------------------------------------------------------------- MemoryRemoteFs (tests)
 class MemoryRemoteFs {
   // failOn(p): throw before touching p · tornOn(p): write half of p, then throw (a dropped connection)
-  constructor() { this.files = new Map(); this.dirs = new Set(['/']); this.failOn = null; this.tornOn = null; }
+  // odd: path → 'link' | 'fifo', for paths a test says are a symlink or a special file
+  constructor() { this.files = new Map(); this.dirs = new Set(['/']); this.failOn = null; this.tornOn = null; this.odd = new Map(); }
+  async lstat(p) {
+    p = posix.normalize(p);
+    const odd = this.odd.get(p);
+    if (odd) return { isDir: false, isFile: false, isLink: odd === 'link' };
+    const st = await this.stat(p);
+    return st && { isDir: st.isDir, isFile: !st.isDir, isLink: false };
+  }
   _check(p) { if (this.failOn && this.failOn(p)) throw new Error(`Simulated failure on ${p}`); }
   async stat(p) {
     p = posix.normalize(p);
@@ -143,6 +152,10 @@ class SftpRemoteFs {
     try { const a = await this._p(cb => this.sftp.stat(p, cb)); return { size: a.size, mtime: a.mtime * 1000, isDir: a.isDirectory(), mode: a.mode }; }
     catch (e) { if (e.code === 2 || /No such file/i.test(e.message)) return null; throw e; }
   }
+  async lstat(p) {
+    try { const a = await this._p(cb => this.sftp.lstat(p, cb)); return { isDir: a.isDirectory(), isFile: a.isFile(), isLink: a.isSymbolicLink() }; }
+    catch (e) { if (e.code === 2 || /No such file/i.test(e.message)) return null; throw e; }
+  }
   async listRecursive(dir, { skipDir } = {}) {
     const out = [];
     const walk = async (abs, rel) => {
@@ -215,6 +228,32 @@ class SftpRemoteFs {
   async close() { try { this.client.end(); } catch { /* ignore */ } }
 }
 
+/**
+ * Why writing or removing <root>/<rel> would not stay inside the site, or null if it's safe: every folder between
+ * the root and the file must be a real folder (a symlinked one would carry the write somewhere else), and the file
+ * itself a plain file or not there yet. The root itself may be a symlink (cPanel's www → public_html is normal).
+ * folders: a Map shared across one run, so each folder is looked at once.
+ */
+async function outsideReason(remoteFs, root, rel, folders = new Map()) {
+  const segs = rel.split('/');
+  let cur = root.replace(/\/$/, '');
+  for (let i = 0; i < segs.length; i++) {
+    cur += '/' + segs[i];
+    const shown = segs.slice(0, i + 1).join('/');
+    const last = i === segs.length - 1;
+    if (!last && folders.has(cur)) { const why = folders.get(cur); if (why === 'missing') return null; if (why) return why; continue; }
+    const st = await remoteFs.lstat(cur);
+    if (!st) { if (!last) folders.set(cur, 'missing'); return null; } // nothing there yet: what gets made is a real folder
+    let why = null;
+    if (st.isLink) why = `${shown} is a symlink on the server, so writing there could reach outside the site`;
+    else if (!last && !st.isDir) why = `${shown} is not a folder on the server`;
+    else if (last && !st.isFile && !st.isDir) why = `${shown} is a special file on the server (not a plain file)`;
+    if (!last) folders.set(cur, why);
+    if (why) return why;
+  }
+  return null;
+}
+
 /** Write a live file the safe way: to its part file first, then swapped in whole. Give { data } or { localPath }. */
 async function writeLive(remoteFs, dest, { data, localPath }) {
   const part = partPath(dest);
@@ -223,4 +262,4 @@ async function writeLive(remoteFs, dest, { data, localPath }) {
   await remoteFs.replace(part, dest);
 }
 
-module.exports = { PART_PREFIX, LOCK_NAME, partPath, isPart, isHidden, writeLive, MemoryRemoteFs, SftpRemoteFs };
+module.exports = { PART_PREFIX, LOCK_NAME, partPath, isPart, isHidden, writeLive, outsideReason, MemoryRemoteFs, SftpRemoteFs };

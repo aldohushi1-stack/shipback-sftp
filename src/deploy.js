@@ -5,7 +5,7 @@ const posix = path.posix;
 const { scanLocal, loadIgnore, dropIgnored, sha256File } = require('./manifest');
 const { plan: makePlan, resolveVerify, MANIFEST_NAME, BACKUP_PREFIX } = require('./diff');
 const { backupFiles, makeStamp, freeBackupDir, writeBackupInfo } = require('./backup');
-const { writeLive } = require('./remote-fs');
+const { writeLive, outsideReason } = require('./remote-fs');
 const { withLock } = require('./lock');
 
 const isBackupDir = name => name.startsWith(BACKUP_PREFIX);
@@ -13,6 +13,15 @@ const isBackupDir = name => name.startsWith(BACKUP_PREFIX);
 async function readRemoteManifest(remoteFs, root) {
   try { return JSON.parse((await remoteFs.readFile(`${root}/${MANIFEST_NAME}`)).toString('utf8')); }
   catch { return null; }
+}
+
+/** Throw before anything changes if any path would write through a symlink or over a special file. */
+async function refuseOutside(remoteFs, root, paths) {
+  const folders = new Map();
+  for (const p of paths) {
+    const why = await outsideReason(remoteFs, root, p, folders);
+    if (why) throw new Error(`Refused: ${why}. Nothing was changed. Ignore that path in sites.json or .deployignore, or replace the symlink with a real folder.`);
+  }
 }
 
 /** Preview only: scan both sides and return the plan. */
@@ -27,6 +36,7 @@ async function previewDeploy({ localDir, remoteRoot, remoteFs, mirror = false, i
   const remoteListing = rootStat ? dropIgnored(await remoteFs.listRecursive(root, { skipDir: isBackupDir }), await loadIgnore(localDir, ignore)) : [];
   const remoteManifest = rootStat ? await readRemoteManifest(remoteFs, root) : null;
   const plan = makePlan({ local, remoteManifest, remoteListing, mirror });
+  if (rootStat) await refuseOutside(remoteFs, root, [...plan.upload.map(u => u.path), ...plan.delete]);
   if (plan.verify.length) await resolveVerify(plan, { readFile: p => remoteFs.readFile(`${root}/${p}`), onEvent });
   onEvent({ type: 'plan', plan, localCount: local.length, remoteCount: remoteListing.length, remoteExists: !!rootStat });
   return { local, plan, remoteExists: !!rootStat };
@@ -114,6 +124,7 @@ async function uploadNow({ files, remoteDir, remoteFs, backup = true, now = new 
   const summary = { uploaded: [], backedUp: [], backupDir: null, bytes: 0 };
   try {
     await remoteFs.mkdirp(root);
+    await refuseOutside(remoteFs, root, files.map(f => f.name));
     if (backup && files.length) {
       const backupDir = await freeBackupDir(remoteFs, root, makeStamp(now));
       await writeBackupInfo({ remoteFs, backupDir, info: { action: 'upload', at: now.toISOString(), status: 'saving', overwritten: [], added: [], deleted: [] } });

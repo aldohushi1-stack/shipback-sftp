@@ -24,7 +24,7 @@ and Linux, and compare every byte on the server, not a sample.
 | **P10** | All of this works through a real SFTP server, and replaced files keep their permissions. |
 | **P11** | A dropped connection fails the deploy out loud and tells you how to undo it. It never stops in silence. |
 | **P12** | Only one deploy or undo writes to a site at a time. A second one is turned away without changing anything, so two runs can never get mixed into one backup. A lock left behind by a run that was cut off clears itself. |
-| **P13** | Undo never touches anything outside the site folder, even if a backup record has been tampered with to say it should. A record that can't be read is refused, never guessed at. |
+| **P13** | Undo never touches anything outside the site folder, even if a backup record has been tampered with to say it should, and neither undo nor deploy writes through a symlink or over a special file on the server. A record that can't be read is refused, never guessed at. |
 
 These have also been run on a real cPanel host, including cutting the connection halfway through a deploy and running
 two deploys at once.
@@ -41,7 +41,8 @@ If undo ever fails to do one of those things, [open an "Undo didn't work" issue]
 
 - **Deploys made with `--no-backup`.** They have nothing to undo from. The agent tools can't make them.
 - **Backups that are gone.** Undo needs that deploy's `_backup-…` folder. `--prune` will remove old ones if you ask, and so can you or your host.
-- **Anything outside the site folder:** databases, server settings, cron jobs, email.
+- **Anything outside the site folder:** databases, server settings, cron jobs, email. The site folder itself may be a
+  symlink (cPanel's `www` → `public_html` is normal), and Shipback follows that one. It won't follow any symlink inside it.
 - **Backups made before 0.2.** Those still restore, but they don't carry the checksums behind P4 and P8.
 - **File dates and owners.** Restored files get the current time. A file brought back after a deploy deleted it gets the server's default permissions.
 - **Losing the hosting account.** Backups sit on the same server as the site. Keep your host's own backups too.

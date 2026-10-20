@@ -26,6 +26,8 @@ if undo ever breaks one of them, that's the first bug I fix.
 - **Restores can be undone too.** A restore backs up what it replaces, the same way a deploy does.
 - **One run at a time.** A deploy or restore holds a lock on the site while it writes. A second one is turned away
   with nothing changed, so an agent and a person can't deploy over each other.
+- **Stays inside the site.** Deploy and undo won't write through a symlink or over a special file on the server,
+  so a symlinked folder can't carry a write somewhere else.
 - **Safe for agents.** The MCP server has no switch to delete server files or skip the backup. A deploy
   only runs the exact plan the agent previewed: if a file changed in between, it refuses.
 - **Spots the drift.** `--pull --dry-run` shows what changed on the server since your last deploy, so
@@ -113,7 +115,8 @@ step, keeping its permissions. Listings hide part files, and the next deploy or 
 
 While a deploy, upload, restore or prune writes, it holds `.shipback-lock` in the remote root and refreshes it every
 30 seconds. The lock is never deployed, pulled or listed. A lock goes stale, and the next run takes it over, when its
-process on this computer has ended or nothing has refreshed it for 2 minutes. So a run that was cut off never leaves
+process on this computer has ended or nothing has refreshed it for 2 minutes. If the system has reused that process
+ID, the lock just waits out the 2 minutes; a run that's still going is never mistaken for a finished one. So a run that was cut off never leaves
 a site locked for long.
 
 `--restore` reads that record and checks each live file first:

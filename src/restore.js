@@ -23,7 +23,7 @@ const posix = require('node:path').posix;
 const { BACKUP_PREFIX, MANIFEST_NAME } = require('./diff');
 const { backupFiles, makeStamp, freeBackupDir, writeBackupInfo, readBackupInfo, BACKUP_INFO } = require('./backup');
 const { listBackups } = require('./prune');
-const { partPath, writeLive } = require('./remote-fs');
+const { partPath, writeLive, outsideReason } = require('./remote-fs');
 const { withLock } = require('./lock');
 
 const sha256 = buf => crypto.createHash('sha256').update(buf).digest('hex');
@@ -97,9 +97,18 @@ async function restoreNow({ remoteRoot, remoteFs, name, dryRun = false, force = 
   };
   const conflict = (p, why) => summary.conflicts.push({ path: p, why });
 
+  // never through a symlink or over a special file, even forced: that could reach outside the site
+  const folders = new Map(), unsafe = new Set();
+  const outside = async p => {
+    const why = await outsideReason(remoteFs, root, p, folders);
+    if (why) { unsafe.add(p); conflict(p, why); }
+    return !!why;
+  };
+
   // 1. what goes back: every file in the backup folder
   const puts = [];
   for (const f of (await remoteFs.listRecursive(dir)).filter(f => f.path !== BACKUP_INFO)) {
+    if (await outside(f.path)) continue;
     const data = await remoteFs.readFile(`${dir}/${f.path}`);
     if (was.has(f.path) && sha256(data) !== was.get(f.path)) { conflict(f.path, 'its copy in the backup folder is damaged (it no longer matches what was saved)'); continue; } // never put back, even forced
     const now_ = await live(f.path);
@@ -112,6 +121,7 @@ async function restoreNow({ remoteRoot, remoteFs, name, dryRun = false, force = 
   // 2. what comes off: the files that run added
   const removes = [];
   if (info) for (const e of info.added) {
+    if (await outside(e.path)) continue;
     const now_ = await live(e.path);
     if (now_ === null) { summary.same.push(e.path); continue; }
     if (now_ === 'dir') { conflict(e.path, 'is a folder on the server now'); continue; }
@@ -132,6 +142,7 @@ async function restoreNow({ remoteRoot, remoteFs, name, dryRun = false, force = 
   // part files a stopped run left behind (hidden from listings, but they hold the run's bytes)
   const sweepParts = async () => {
     for (const p of new Set([...left.keys(), ...deleted])) {
+      if (unsafe.has(p)) continue;
       const part = partPath(`${root}/${p}`);
       if (await remoteFs.stat(part)) await remoteFs.remove(part).catch(() => {});
     }
