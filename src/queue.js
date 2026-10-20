@@ -36,7 +36,7 @@ function fmtEvent(ev) {
     case 'conflict': return `${t}  CONFLICT ${ev.path}: ${ev.why}`;
     case 'manifest': return `${t}  wrote ${ev.path}`;
     case 'done': return `${t}  done`;
-    case 'error': return `${t}  ERROR ${ev.message}`;
+    case 'error': return `${t}  ERROR ${ev.message}${ev.undo ? ` ${ev.undo}` : ''}`;
     default: return `${t}  ${ev.type}`;
   }
 }

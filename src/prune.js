@@ -13,6 +13,7 @@
 // → { dryRun, backups, targets, pruned: [{ name, files, bytes }], refused: [{ name, unique }], deleted, bytes }
 const crypto = require('node:crypto');
 const { BACKUP_PREFIX } = require('./diff');
+const { withLock } = require('./lock');
 const { BACKUP_INFO } = require('./backup');
 
 const sha256 = buf => crypto.createHash('sha256').update(buf).digest('hex');
@@ -47,7 +48,12 @@ function chooseTargets(backups, { names, keep }) {
   throw new Error('Say which backups to prune: "names": ["_backup-…"] or "keep": N (newest N stay)');
 }
 
-async function runPrune({ remoteRoot, remoteFs, names, keep, dryRun = false, force = false, onEvent = () => {} }) {
+function runPrune(opts) {
+  if (opts.dryRun) return pruneNow(opts);
+  return withLock({ remoteFs: opts.remoteFs, root: opts.remoteRoot, action: 'prune', onEvent: opts.onEvent }, () => pruneNow(opts));
+}
+
+async function pruneNow({ remoteRoot, remoteFs, names, keep, dryRun = false, force = false, onEvent = () => {} }) {
   const root = remoteRoot.replace(/\/$/, '');
   onEvent({ type: 'scan', side: 'remote', dir: root });
   const backups = await listBackups(remoteFs, root);

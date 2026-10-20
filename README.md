@@ -11,13 +11,21 @@ Shipback deploys a folder to any SFTP host: cPanel, Plesk, DirectAdmin, a plain 
 can be undone with one command. You can run it yourself, script it, or hand it to Claude Code, Cursor or
 any MCP client.
 
+**[The undo promise](UNDO-PROMISE.md):** one command puts the site back byte for byte, even after a deploy that
+was cut off halfway. It never overwrites a live edit. Each of the thirteen lines in the promise has its own test, and
+if undo ever breaks one of them, that's the first bug I fix.
+
 - **Backup before every overwrite.** The server's copy of each file a deploy replaces is saved into
   `_backup-<time>/` on the server, before the upload starts.
+- **Never half a file.** Each file goes up beside the live one and is swapped in whole, so a dropped connection
+  leaves the old file, not a broken one.
 - **One-command undo.** `--restore` puts those files back and removes the files that deploy added.
 - **It won't undo over a live edit.** If someone changed a file on the server after the deploy, restore
   stops and names the file. Nothing is touched unless you pass `--force`, and even then the edited copy is
   backed up first.
 - **Restores can be undone too.** A restore backs up what it replaces, the same way a deploy does.
+- **One run at a time.** A deploy or restore holds a lock on the site while it writes. A second one is turned away
+  with nothing changed, so an agent and a person can't deploy over each other.
 - **Safe for agents.** The MCP server has no switch to delete server files or skip the backup. A deploy
   only runs the exact plan the agent previewed: if a file changed in between, it refuses.
 - **Spots the drift.** `--pull --dry-run` shows what changed on the server since your last deploy, so
@@ -28,7 +36,8 @@ and Linux with Node 18, 20 and 22 on every push. Passwords are kept in the OS ke
 pass through the model.
 
 **It has run in production.** The deploy engine underneath has shipped [aldo.today](https://aldo.today) 235 times
-since September 2026 (2,907 files to a cPanel host). Restore and the MCP server are new in 0.1.
+since September 2026 (2,907 files to a cPanel host). Restore and the MCP server are new since 0.1, and the
+cut-off handling behind the promise is new in 0.2.
 
 ## Quick start
 
@@ -83,7 +92,8 @@ shipback <site> --prune --keep 10         # tidy old backups; refuses any holdin
 shipback --history [site]                 # what went up, when, from where
 ```
 
-Add `--json` to any command for machine-readable output. A refused restore exits with code 4.
+Add `--json` to any command for machine-readable output. A refused restore exits with code 4, and a run turned away
+because another one is writing to the site exits with code 5.
 
 `--mirror` (delete server files that aren't in the local folder) and `--no-backup` exist for humans who
 know they want them. The agent tools don't offer them, and the [guard hook](#claude-code-guard-hook)
@@ -94,7 +104,17 @@ blocks Claude from typing them.
 Each deploy writes `_backup-YYYY-MM-DD-HHMM/` in the remote root. It holds:
 
 - the server's copy of every file the deploy **overwrote** or **deleted**
-- `.backup.json`, a record of what the deploy **added**, and a SHA-256 of every file it left on the server
+- `.backup.json`, a record of what the deploy **added**, a SHA-256 of every file it left on the server, and a
+  SHA-256 of every copy it saved, so a damaged copy is never put back
+
+The record says `saving` until every copy is made. A deploy cut off before then hasn't changed anything, and
+`--restore` says so. New files go up as `.shipback-part-<name>` beside the live file and are renamed over it in one
+step, keeping its permissions. Listings hide part files, and the next deploy or restore clears any that are left.
+
+While a deploy, upload, restore or prune writes, it holds `.shipback-lock` in the remote root and refreshes it every
+30 seconds. The lock is never deployed, pulled or listed. A lock goes stale, and the next run takes it over, when its
+process on this computer has ended or nothing has refreshed it for 2 minutes. So a run that was cut off never leaves
+a site locked for long.
 
 `--restore` reads that record and checks each live file first:
 
@@ -105,7 +125,8 @@ Each deploy writes `_backup-YYYY-MM-DD-HHMM/` in the remote root. It holds:
 | different from both | **conflict**: stops, names the file, changes nothing (`--force` overrides) |
 
 Before writing anything, restore saves the current live files into a new `_backup-…` folder with its own
-record, so `--restore` on that folder takes you forward again. It also clears the restored paths from
+record, so `--restore` on that folder takes you forward again. If a restore is cut off, plain `--restore` sees that
+the latest run is an unfinished restore and finishes it. It also clears the restored paths from
 `.deploy-manifest.json`, so the next deploy compares them by content instead of trusting stale hashes.
 
 Backup folders are skipped by deploys and pulls, and are never deleted except by `--prune`.
@@ -199,7 +220,8 @@ still run them yourself in a terminal. After `npm install -g shipback-sftp`, the
 npm test
 ```
 
-The suite uses `node:test` and needs no network. Deploy, restore, the CLI and the MCP server are each
+The suite uses `node:test` and needs no network. `test/promise.test.js` holds one test per line of the
+[undo promise](UNDO-PROMISE.md). Deploy, restore, the CLI and the MCP server are each
 also exercised end to end against a real SFTP server started inside the test run.
 
 ## Limits
@@ -210,6 +232,8 @@ also exercised end to end against a real SFTP server started inside the test run
   hosting account. Keep your host's own backups too.
 - Files over 8 MB with the same size on both sides are assumed unchanged when there is no manifest hash
   to compare.
+- What undo doesn't cover (databases, `--no-backup` deploys, pruned backups and so on) is listed in
+  [the undo promise](UNDO-PROMISE.md#what-it-doesnt-cover).
 
 ## License
 

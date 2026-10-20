@@ -1,0 +1,63 @@
+name: Undo didn't work
+description: A restore didn't do what UNDO-PROMISE.md says. This goes to the top of the list.
+title: "Undo didn't work: "
+labels: [undo-promise]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Sorry. This is the bug I fix first. If your site is down right now, say so in the first box. Everything the
+        deploy replaced is still in its `_backup-…` folder on your server, so nothing is lost yet: please don't delete
+        or prune that folder.
+
+        Remove host names, usernames and paths you'd rather not share.
+  - type: dropdown
+    id: clause
+    attributes:
+      label: Which part of the promise broke?
+      options:
+        - "P1: a file didn't come back exactly, or something else was touched"
+        - "P2/P3: undo after a cut-off deploy didn't work"
+        - "P4/P5: a deploy that failed early changed something"
+        - "P6: running a cut-off restore again didn't finish it"
+        - "P7: it restored over a file someone had edited live"
+        - "P8: it wrote back a damaged backup copy"
+        - "P9: undoing the undo didn't work"
+        - "P10: permissions changed"
+        - "P11: it stopped without saying anything"
+        - "P12: two runs wrote to the site at once, or a lock never cleared"
+        - "P13: it touched something outside the site folder"
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you ran, what you expected, and what happened instead. Say if the site is down now.
+    validations:
+      required: true
+  - type: dropdown
+    id: how
+    attributes:
+      label: How were you running it?
+      options:
+        - CLI (shipback)
+        - MCP server (shipback-mcp) from an AI client
+        - Drop-box queue
+        - Local app (npm start)
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions and host
+      placeholder: shipback-sftp 0.2.0, Node 22, macOS, cPanel
+    validations:
+      required: true
+  - type: textarea
+    id: backups
+    attributes:
+      label: Output of --backups and --restore --dry-run --json
+      description: "`shipback <site> --backups` and `shipback <site> --restore --dry-run --json`. Both are read-only."
+      render: text

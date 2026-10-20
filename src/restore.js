@@ -5,6 +5,9 @@
 // .backup.json saying which files it added and what it uploaded (sha256). Restore:
 //   · checks first that each live file is still what that run left there (or is already the old copy).
 //     A file edited on the server since is a conflict, and then nothing is changed unless { force: true }
+//   · checks each saved copy against the sha256 recorded when it was saved: a damaged copy is never put back
+//   · copes with a run that stopped part way: files it never reached are already right, and a file caught
+//     between "old removed" and "new swapped in" (servers without posix-rename) is found in its part file
 //   · backs up everything it is about to change into a new _backup-<stamp>/ with its own .backup.json,
 //     so a restore can itself be restored
 //   · writes each backed-up file back to its live path and removes the files that run added
@@ -20,6 +23,8 @@ const posix = require('node:path').posix;
 const { BACKUP_PREFIX, MANIFEST_NAME } = require('./diff');
 const { backupFiles, makeStamp, freeBackupDir, writeBackupInfo, readBackupInfo, BACKUP_INFO } = require('./backup');
 const { listBackups } = require('./prune');
+const { partPath, writeLive } = require('./remote-fs');
+const { withLock } = require('./lock');
 
 const sha256 = buf => crypto.createHash('sha256').update(buf).digest('hex');
 
@@ -39,29 +44,55 @@ async function describeBackups({ remoteRoot, remoteFs }) {
     const info = await readBackupInfo(remoteFs, `${root}/${name}`);
     const files = (await remoteFs.listRecursive(`${root}/${name}`)).filter(f => f.path !== BACKUP_INFO).length;
     out.push(info
-      ? { name, action: info.action, at: info.at, from: info.from, overwritten: info.overwritten.length, added: info.added.length, deleted: info.deleted.length, files, legacy: false }
+      ? { name, action: info.action, at: info.at, from: info.from, overwritten: info.overwritten.length, added: info.added.length, deleted: info.deleted.length, files, legacy: false, status: info.status }
       : { name, files, legacy: true });
   }
   return out;
 }
 
-async function runRestore({ remoteRoot, remoteFs, name, dryRun = false, force = false, now = new Date(), onEvent = () => {} }) {
+function runRestore(opts) {
+  if (opts.dryRun) return restoreNow(opts);
+  return withLock({ remoteFs: opts.remoteFs, root: opts.remoteRoot, action: 'restore', onEvent: opts.onEvent }, () => restoreNow(opts));
+}
+
+async function restoreNow({ remoteRoot, remoteFs, name, dryRun = false, force = false, now = new Date(), onEvent = () => {} }) {
   const root = remoteRoot.replace(/\/$/, '');
   onEvent({ type: 'scan', side: 'remote', dir: root });
-  const target = chooseBackup(await listBackups(remoteFs, root), name);
+  let target = chooseBackup(await listBackups(remoteFs, root), name);
+  let info = await readBackupInfo(remoteFs, `${root}/${target}`);
+  let resumed = null;
+  // the latest run is a restore that was cut off: running it again finishes that restore
+  const latest = name === undefined || name === null || name === '' || name === 'latest';
+  if (latest && info && info.action === 'restore' && info.status && info.from) {
+    resumed = target; target = chooseBackup(await listBackups(remoteFs, root), info.from);
+    info = await readBackupInfo(remoteFs, `${root}/${target}`);
+  }
   const dir = `${root}/${target}`;
-  const info = await readBackupInfo(remoteFs, dir);
-  const summary = { dryRun, backup: target, action: info ? info.action : undefined, legacy: !info, put: [], remove: [], same: [], conflicts: [], refused: false, undoBackupDir: null };
+  const summary = { dryRun, backup: target, action: info ? info.action : undefined, legacy: !info, resumed, stoppedEarly: false, put: [], remove: [], same: [], conflicts: [], refused: false, undoBackupDir: null };
+  if (info && info.status === 'saving') {
+    // that run was cut off while it was still making its backup copies, before it changed a single live file
+    summary.stoppedEarly = true;
+    onEvent({ type: 'restore-plan', backup: target, put: [], remove: [], same: 0, conflicts: 0, legacy: false, stoppedEarly: true });
+    onEvent({ type: 'done', summary });
+    return summary;
+  }
 
   const left = new Map();      // path → sha256 the run left there (overwritten + added)
   const deleted = new Set();   // paths the run deleted
+  const was = new Map();       // path → sha256 of the copy saved in the backup folder (records from 0.2 on)
   if (info) {
     for (const e of [...info.overwritten, ...info.added]) left.set(e.path, e.sha256);
     for (const e of info.deleted) deleted.add(e.path);
+    for (const e of [...info.overwritten, ...info.deleted]) if (e.was) was.set(e.path, e.was);
   }
   const live = async p => {
     const st = await remoteFs.stat(`${root}/${p}`);
-    if (!st) return null;
+    if (!st) {
+      // the line dropped mid-swap: the run's whole copy is still in the part file
+      const part = partPath(`${root}/${p}`);
+      if (left.has(p) && await remoteFs.stat(part) && sha256(await remoteFs.readFile(part)) === left.get(p)) return left.get(p);
+      return null;
+    }
     return st.isDir ? 'dir' : sha256(await remoteFs.readFile(`${root}/${p}`));
   };
   const conflict = (p, why) => summary.conflicts.push({ path: p, why });
@@ -70,6 +101,7 @@ async function runRestore({ remoteRoot, remoteFs, name, dryRun = false, force = 
   const puts = [];
   for (const f of (await remoteFs.listRecursive(dir)).filter(f => f.path !== BACKUP_INFO)) {
     const data = await remoteFs.readFile(`${dir}/${f.path}`);
+    if (was.has(f.path) && sha256(data) !== was.get(f.path)) { conflict(f.path, 'its copy in the backup folder is damaged (it no longer matches what was saved)'); continue; } // never put back, even forced
     const now_ = await live(f.path);
     if (now_ === sha256(data)) { summary.same.push(f.path); continue; }
     if (now_ === 'dir') { conflict(f.path, 'is a folder on the server now'); continue; } // can't write a file over it, even forced
@@ -97,45 +129,65 @@ async function runRestore({ remoteRoot, remoteFs, name, dryRun = false, force = 
     onEvent({ type: 'done', summary });
     return summary;
   }
-  if (dryRun || (!puts.length && !removes.length)) { onEvent({ type: 'done', summary }); return summary; }
-
-  // 3. back up what is live now, so this restore can be undone too
-  const undoDir = await freeBackupDir(remoteFs, root, makeStamp(now));
-  const res = await backupFiles({ remoteFs, root, paths: [...summary.put, ...summary.remove], backupDir: undoDir, onEvent });
-  const copied = new Set(res.copied);
-  await writeBackupInfo({ remoteFs, backupDir: undoDir, info: {
-    action: 'restore', from: target, at: now.toISOString(),
-    overwritten: puts.filter(p => copied.has(p.path)).map(p => ({ path: p.path, sha256: sha256(p.data) })),
-    added: puts.filter(p => !copied.has(p.path)).map(p => ({ path: p.path, sha256: sha256(p.data) })),
-    deleted: removes.filter(p => copied.has(p)).map(p => ({ path: p })),
-  } });
-  summary.undoBackupDir = undoDir;
-
-  // 4. put the old copies back, take the added files off
-  const madeDirs = new Set();
-  for (const p of puts) {
-    const dest = `${root}/${p.path}`;
-    const d = posix.dirname(dest);
-    if (!madeDirs.has(d)) { await remoteFs.mkdirp(d); madeDirs.add(d); }
-    await remoteFs.writeFile(dest, p.data);
-    onEvent({ type: 'restore', path: p.path, bytes: p.data.length });
-  }
-  for (const p of removes) { await remoteFs.remove(`${root}/${p}`); onEvent({ type: 'delete', path: p }); }
-  // folders the deploy made just for added files go too, once empty
-  for (const d of [...new Set(removes.map(p => posix.dirname(p)).filter(d => d !== '.'))].sort((a, b) => b.length - a.length)) {
-    for (let cur = d; cur !== '.'; cur = posix.dirname(cur)) {
-      const abs = `${root}/${cur}`;
-      if (!(await remoteFs.stat(abs)) || (await remoteFs.listDir(abs)).length) break;
-      await remoteFs.rmdir(abs);
+  // part files a stopped run left behind (hidden from listings, but they hold the run's bytes)
+  const sweepParts = async () => {
+    for (const p of new Set([...left.keys(), ...deleted])) {
+      const part = partPath(`${root}/${p}`);
+      if (await remoteFs.stat(part)) await remoteFs.remove(part).catch(() => {});
     }
-  }
-
-  // 5. the manifest no longer describes these paths
+  };
+  if (dryRun) { onEvent({ type: 'done', summary }); return summary; }
+  if (!puts.length && !removes.length) { await sweepParts(); onEvent({ type: 'done', summary }); return summary; }
   try {
-    const m = JSON.parse((await remoteFs.readFile(`${root}/${MANIFEST_NAME}`)).toString('utf8'));
-    for (const p of [...summary.put, ...summary.remove]) delete m.files[p];
-    await remoteFs.writeFile(`${root}/${MANIFEST_NAME}`, JSON.stringify(m, null, 1));
-  } catch { /* no manifest: nothing to correct */ }
+    // 3. back up what is live now, so this restore can be undone too. Its record says 'saving', then 'running'
+    //    while files are written, then nothing: cut off part way, running restore again finishes the job.
+    const undoDir = await freeBackupDir(remoteFs, root, makeStamp(now));
+    summary.undoBackupDir = undoDir;
+    const head = { action: 'restore', from: target, at: now.toISOString() };
+    await writeBackupInfo({ remoteFs, backupDir: undoDir, info: { ...head, status: 'saving', overwritten: [], added: [], deleted: [] } });
+    const res = await backupFiles({ remoteFs, root, paths: [...summary.put, ...summary.remove], backupDir: undoDir, onEvent });
+    const copied = new Set(res.copied);
+    const record = {
+      ...head,
+      overwritten: puts.filter(p => copied.has(p.path)).map(p => ({ path: p.path, sha256: sha256(p.data), was: res.was.get(p.path) })),
+      added: puts.filter(p => !copied.has(p.path)).map(p => ({ path: p.path, sha256: sha256(p.data) })),
+      deleted: removes.filter(p => copied.has(p)).map(p => ({ path: p, was: res.was.get(p) })),
+    };
+    await writeBackupInfo({ remoteFs, backupDir: undoDir, info: { ...record, status: 'running' } });
+
+    // 4. put the old copies back, take the added files off
+    const madeDirs = new Set();
+    for (const p of puts) {
+      const dest = `${root}/${p.path}`;
+      const d = posix.dirname(dest);
+      if (!madeDirs.has(d)) { await remoteFs.mkdirp(d); madeDirs.add(d); }
+      await writeLive(remoteFs, dest, { data: p.data });
+      onEvent({ type: 'restore', path: p.path, bytes: p.data.length });
+    }
+    for (const p of removes) { await remoteFs.remove(`${root}/${p}`); onEvent({ type: 'delete', path: p }); }
+    // folders the deploy made just for added files go too, once empty
+    for (const d of [...new Set(removes.map(p => posix.dirname(p)).filter(d => d !== '.'))].sort((a, b) => b.length - a.length)) {
+      for (let cur = d; cur !== '.'; cur = posix.dirname(cur)) {
+        const abs = `${root}/${cur}`;
+        if (!(await remoteFs.stat(abs)) || (await remoteFs.listDir(abs)).length) break;
+        await remoteFs.rmdir(abs);
+      }
+    }
+
+    await sweepParts();
+
+    // 5. the manifest no longer describes these paths
+    try {
+      const m = JSON.parse((await remoteFs.readFile(`${root}/${MANIFEST_NAME}`)).toString('utf8'));
+      for (const p of [...summary.put, ...summary.remove]) delete m.files[p];
+      await remoteFs.writeFile(`${root}/${MANIFEST_NAME}`, JSON.stringify(m, null, 1));
+    } catch { /* no manifest: nothing to correct */ }
+    await writeBackupInfo({ remoteFs, backupDir: undoDir, info: record });
+  } catch (err) {
+    err.undo = 'The restore stopped part way. Run the same restore again: it finishes the job.';
+    onEvent({ type: 'error', message: err.message, undo: err.undo, summary });
+    throw err;
+  }
 
   onEvent({ type: 'done', summary });
   return summary;

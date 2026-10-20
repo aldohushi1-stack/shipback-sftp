@@ -1,6 +1,6 @@
 {
   "name": "shipback-sftp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "SFTP deploys to shared hosting that you, a script or an AI agent can undo: backup before every overwrite, one-command restore that won't clobber live edits, and an MCP server.",
   "keywords": [
     "sftp",
@@ -32,6 +32,7 @@
     "start.bat",
     "sites.example.json",
     "README.md",
+    "UNDO-PROMISE.md",
     "LICENSE"
   ],
   "scripts": {

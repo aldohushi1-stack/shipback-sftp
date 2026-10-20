@@ -119,7 +119,8 @@ ${site.host}:${remoteRoot}  restore from ${ev.backup}${ev.legacy ? '  (older bac
 `);
     } else if (ev.type === 'conflict') console.log(`  CONFLICT ${ev.path}: ${ev.why}`);
     else if (ev.type === 'restore') console.log(`  restore ${ev.path}`);
-    else if (ev.type === 'error') console.error(`  ERROR   ${ev.message}`);
+    else if (ev.type === 'error') console.error(`  ERROR   ${ev.message}${ev.undo ? `
+          ${ev.undo}` : ''}`);
   };
   const common = { localDir, remoteRoot, remoteFs: rfs, dryRun: !!args.dryRun, backup: args.backup !== false, mirror: !!args.mirror, ignore: site.ignore, onEvent };
   try {
@@ -127,12 +128,14 @@ ${site.host}:${remoteRoot}  restore from ${ev.backup}${ev.legacy ? '  (older bac
       const list = await describeBackups({ remoteRoot, remoteFs: rfs });
       if (args.json) console.log(JSON.stringify(list, null, 2));
       else if (!list.length) console.log('No backups on the server.');
-      else for (const b of list) console.log(`  ${b.name.padEnd(28)} ${b.legacy ? `${b.files} files (older backup, no record)` : `${b.action.padEnd(8)} ${b.overwritten} overwritten, ${b.added} added, ${b.deleted} deleted${b.from ? '  (undo of ' + b.from + ')' : ''}`}`);
+      else for (const b of list) console.log(`  ${b.name.padEnd(28)} ${b.legacy ? `${b.files} files (older backup, no record)` : `${b.action.padEnd(8)} ${b.overwritten} overwritten, ${b.added} added, ${b.deleted} deleted${b.from ? '  (undo of ' + b.from + ')' : ''}${b.status === 'saving' ? '  [cut off before changing anything]' : b.status ? '  [cut off part way]' : ''}`}`);
       return;
     }
     if (args.restore) {
       const s = await runRestore({ remoteRoot, remoteFs: rfs, name: args.name, dryRun: !!args.dryRun, force: !!args.force, onEvent });
-      if (s.refused) { console.log(`Refused: ${s.conflicts.length} file(s) changed on the server after that run. Nothing was changed. Check them, then add --force to restore anyway (the live copies are backed up first).`); process.exitCode = 4; }
+      if (s.resumed) console.log(`(${s.resumed} is a restore that was cut off, so this finishes it: restoring ${s.backup})`);
+      if (s.stoppedEarly) console.log(`${s.backup} was cut off while it was still saving backups, before it changed any live file. Nothing to undo.`);
+      else if (s.refused) { console.log(`Refused: ${s.conflicts.length} file(s) changed on the server after that run. Nothing was changed. Check them, then add --force to restore anyway (the live copies are backed up first).`); process.exitCode = 4; }
       else if (s.dryRun) console.log('Dry run — nothing was changed.');
       else console.log(`Done: ${s.put.length} put back, ${s.remove.length} removed${s.undoBackupDir ? `. Undo this with --restore ${s.undoBackupDir.split('/').pop()}` : ''}.`);
       if (!s.dryRun) await appendHistory(historyFile, recordFromSummary({ action, site: site.name, trigger: 'cli', remoteDir: remoteRoot, startedAt, summary: s })).catch(() => {});
@@ -152,7 +155,7 @@ ${site.host}:${remoteRoot}  restore from ${ev.backup}${ev.legacy ? '  (older bac
     }
     if (args.json) console.log(JSON.stringify(s));
   } catch (e) {
-    process.exitCode = 3;
+    process.exitCode = e.code === 'ELOCKED' ? 5 : 3;
     await appendHistory(historyFile, recordFromSummary({ action, site: site.name, trigger: 'cli', localDir, remoteDir: remoteRoot, startedAt, error: e.message })).catch(() => {});
   }
   finally { await rfs.close(); }

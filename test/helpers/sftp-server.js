@@ -70,6 +70,7 @@ async function start({ root, username = 'user', password = 'pass' }) {
             let f = 'r';
             const w = flags & OPEN_MODE.WRITE, c = flags & OPEN_MODE.CREAT, t = flags & OPEN_MODE.TRUNC, a = flags & OPEN_MODE.APPEND;
             if (a) f = 'a'; else if (w && c && t) f = 'w'; else if (w && c) f = 'w'; else if (w) f = 'r+';
+            if (w && c && (flags & OPEN_MODE.EXCL)) f = 'wx';
             fs.open(abs(p), f, (e, fd) => e ? sftp.status(reqid, errCode(e)) : sftp.handle(reqid, mkHandle({ fd })));
           });
           sftp.on('READ', (reqid, h, offset, length) => {
@@ -93,8 +94,12 @@ async function start({ root, username = 'user', password = 'pass' }) {
           sftp.on('MKDIR', (reqid, p) => fsp.mkdir(abs(p)).then(() => sftp.status(reqid, STATUS_CODE.OK), e => sftp.status(reqid, errCode(e))));
           sftp.on('RMDIR', (reqid, p) => fsp.rmdir(abs(p)).then(() => sftp.status(reqid, STATUS_CODE.OK), e => sftp.status(reqid, errCode(e))));
           sftp.on('REMOVE', (reqid, p) => fsp.unlink(abs(p)).then(() => sftp.status(reqid, STATUS_CODE.OK), e => sftp.status(reqid, errCode(e))));
-          sftp.on('RENAME', (reqid, a, b) => fsp.rename(abs(a), abs(b)).then(() => sftp.status(reqid, STATUS_CODE.OK), e => sftp.status(reqid, errCode(e))));
-          sftp.on('SETSTAT', (reqid) => sftp.status(reqid, STATUS_CODE.OK));
+          // like OpenSSH's sftp-server: a plain RENAME never replaces an existing file (posix-rename does, but
+          // this server doesn't offer it, so the client's fallback path is the one under test)
+          sftp.on('RENAME', (reqid, a, b) => fsp.stat(abs(b)).then(() => sftp.status(reqid, STATUS_CODE.FAILURE), () =>
+            fsp.rename(abs(a), abs(b)).then(() => sftp.status(reqid, STATUS_CODE.OK), e => sftp.status(reqid, errCode(e)))));
+          sftp.on('SETSTAT', (reqid, p, attrs) => (attrs && attrs.mode !== undefined ? fsp.chmod(abs(p), attrs.mode & 0o7777) : Promise.resolve())
+            .then(() => sftp.status(reqid, STATUS_CODE.OK), e => sftp.status(reqid, errCode(e))));
           sftp.on('FSETSTAT', (reqid) => sftp.status(reqid, STATUS_CODE.OK));
         });
       });

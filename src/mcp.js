@@ -153,7 +153,9 @@ function createMcp(opts = {}) {
       return {
         planId: restorePlanId(site, s), site: site.name, backup: s.backup, undoes: s.action, legacy: s.legacy || undefined,
         putBack: cap(s.put), remove: cap(s.remove), alreadyRight: s.same.length, conflicts: s.conflicts,
-        note: s.conflicts.length ? 'Some live files were changed after that run. Show the user the conflicts; restore refuses them unless force is true.'
+        resumes: s.resumed || undefined,
+        note: s.stoppedEarly ? 'That run was cut off while saving its backups, before it changed any live file. There is nothing to undo.'
+          : s.conflicts.length ? 'Some live files were changed after that run. Show the user the conflicts; restore refuses them unless force is true.'
           : s.put.length || s.remove.length ? 'Call restore with this backup and planId to go ahead. The current live files are backed up first.' : 'The site already matches this backup.',
       };
     }),
@@ -181,7 +183,8 @@ function createMcp(opts = {}) {
       const out = await tools[name](args || {});
       return { content: [{ type: 'text', text: JSON.stringify(out, null, 2) }] };
     } catch (e) {
-      return { content: [{ type: 'text', text: e.message }], isError: true };
+      return { content: [{ type: 'text', text: e.undo ? `${e.message}
+${e.undo} Call preview_restore to see it.` : e.message }], isError: true };
     }
   }
 
